@@ -236,9 +236,18 @@ function Pomodoro() {
 
   useEffect(() => {
     if (phase === "focus" && running && character) {
-      const lines = character === "H" ? H_IDLE_LINES : P_IDLE_LINES;
-      setIdleLine(lines[Math.floor(Math.random() * lines.length)]);
-      idleIntervalRef.current = setInterval(() => { setIdleLine(lines[Math.floor(Math.random() * lines.length)]); }, 45000);
+      const idleLines = character === "H" ? H_IDLE_LINES : P_IDLE_LINES;
+      const cameoLines = character === "H"
+        ? (typeof H_CAMEO_LINES !== "undefined" ? H_CAMEO_LINES : [])
+        : (typeof P_CAMEO_LINES !== "undefined" ? P_CAMEO_LINES : []);
+      const pickLine = () => {
+        if (Math.random() < 0.08 && cameoLines.length > 0) {
+          return cameoLines[Math.floor(Math.random() * cameoLines.length)];
+        }
+        return idleLines[Math.floor(Math.random() * idleLines.length)];
+      };
+      setIdleLine(pickLine());
+      idleIntervalRef.current = setInterval(() => { setIdleLine(pickLine()); }, 45000);
       return () => clearInterval(idleIntervalRef.current);
     }
   }, [phase, running, character]);
