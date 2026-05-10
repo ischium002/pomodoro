@@ -53,6 +53,13 @@ const STORAGE = {
     unlocked.push(idx);
     this.setUnlocked(unlocked);
     return idx;
+  },
+  getRecent() { try { return JSON.parse(localStorage.getItem("pomo-recent") || "[]"); } catch { return []; } },
+  pushRecent(key) {
+    var recent = this.getRecent();
+    recent.push(key);
+    while (recent.length > 5) recent.shift();
+    localStorage.setItem("pomo-recent", JSON.stringify(recent));
   }
 };
 
@@ -237,6 +244,8 @@ function Pomodoro() {
   }, [phase, running, character]);
 
   const triggerComplete = useCallback((currentPhase) => {
+    if (!endTimeRef.current) return;
+    endTimeRef.current = null;
     clearInterval(intervalRef.current); setRunning(false); playSound();
     if (currentPhase === "focus") {
       setFinished(true); setCompleted(c => c + 1);
@@ -274,7 +283,15 @@ function Pomodoro() {
   const startSession = () => {
     const c = Math.random() > 0.5 ? "P" : "H";
     const pool = c === "H" ? H_TASKS : P_TASKS;
-    const t = pool[Math.floor(Math.random() * pool.length)];
+    const recent = STORAGE.getRecent();
+    const available = [];
+    for (let i = 0; i < pool.length; i++) {
+      if (recent.indexOf(c + ":" + i) === -1) available.push(i);
+    }
+    const indices = available.length > 0 ? available : pool.map((_, i) => i);
+    const idx = indices[Math.floor(Math.random() * indices.length)];
+    const t = pool[idx];
+    STORAGE.pushRecent(c + ":" + idx);
     setCharacter(c); setTask(t); setPhase("focus"); setTimeLeft(MODES.focus.duration);
     endTimeRef.current = Date.now() + MODES.focus.duration * 1000;
     setRunning(true); setInterrupted(false); setFinished(false); setShowGoalInput(false); setNewCollectible(null);
