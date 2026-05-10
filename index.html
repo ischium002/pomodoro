@@ -6,25 +6,20 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Pomodoro</title>
-<link rel="icon" type="image/png" href="https://res.cloudinary.com/dp5ayfo4z/image/upload/v1775668521/A5FB6ECA8E02B834821907C7618741E5_uzf777.png">
-<link rel="apple-touch-icon" href="https://res.cloudinary.com/dp5ayfo4z/image/upload/v1778392093/3aec6df6c4f9c04cfa6c8741538ee890_mgzbhs.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; width: 100%; }
   body { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   button:active { transform: scale(0.96) !important; }
   input:focus { outline: none; }
 </style>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
-<!-- 角色数据：只需要替换这个文件 -->
 <script src="tasks.js"></script>
 </head>
 <body>
@@ -32,11 +27,155 @@
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
-const MODES = {
-  focus: { duration: 25 * 60 },
-  shortBreak: { duration: 5 * 60 },
-  longBreak: { duration: 15 * 60 },
+// === localStorage helpers ===
+const STORAGE = {
+  getDaily() {
+    try { return JSON.parse(localStorage.getItem("pomo-daily") || "{}"); } catch { return {}; }
+  },
+  setDaily(d) { localStorage.setItem("pomo-daily", JSON.stringify(d)); },
+  getUnlocked() {
+    try { return JSON.parse(localStorage.getItem("pomo-unlocked") || "[]"); } catch { return []; }
+  },
+  setUnlocked(u) { localStorage.setItem("pomo-unlocked", JSON.stringify(u)); },
+  getTotal() { return parseInt(localStorage.getItem("pomo-total") || "0", 10); },
+  setTotal(n) { localStorage.setItem("pomo-total", String(n)); },
+  recordCompletion() {
+    const today = new Date().toISOString().slice(0, 10);
+    const daily = this.getDaily();
+    daily[today] = (daily[today] || 0) + 1;
+    this.setDaily(daily);
+    this.setTotal(this.getTotal() + 1);
+  },
+  unlockNext() {
+    const unlocked = this.getUnlocked();
+    if (typeof COLLECTIBLES === "undefined" || unlocked.length >= COLLECTIBLES.length) return null;
+    const remaining = [];
+    for (let i = 0; i < COLLECTIBLES.length; i++) { if (!unlocked.includes(i)) remaining.push(i); }
+    if (remaining.length === 0) return null;
+    const idx = remaining[Math.floor(Math.random() * remaining.length)];
+    unlocked.push(idx);
+    this.setUnlocked(unlocked);
+    return idx;
+  }
 };
+
+// === Heatmap Component ===
+function Heatmap({ color }) {
+  const daily = STORAGE.getDaily();
+  const today = new Date();
+  const days = [];
+  for (let i = 48; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days.push({ key, count: daily[key] || 0, dow: d.getDay() });
+  }
+  // arrange into 7 weeks of 7 days
+  const weeks = [];
+  let week = new Array(7).fill(null);
+  for (const day of days) {
+    week[day.dow] = day;
+    if (day.dow === 6) { weeks.push(week); week = new Array(7).fill(null); }
+  }
+  if (week.some(d => d !== null)) weeks.push(week);
+
+  const maxCount = Math.max(1, ...days.map(d => d.count));
+  const getOpacity = (count) => {
+    if (count === 0) return 0.06;
+    return 0.2 + (count / maxCount) * 0.8;
+  };
+
+  return (
+    <div style={{ display: "flex", gap: "3px", justifyContent: "center" }}>
+      {weeks.map((w, wi) => (
+        <div key={wi} style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+          {w.map((d, di) => (
+            <div key={di} style={{
+              width: "10px", height: "10px", borderRadius: "2px",
+              background: d ? color : "transparent",
+              opacity: d ? getOpacity(d.count) : 0,
+              transition: "opacity 0.3s",
+            }} title={d ? `${d.key}: ${d.count}` : ""} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// === Collection Viewer ===
+function CollectionViewer({ onClose }) {
+  const unlocked = STORAGE.getUnlocked();
+  const total = typeof COLLECTIBLES !== "undefined" ? COLLECTIBLES.length : 0;
+  // group by tag
+  const groups = {};
+  unlocked.sort((a, b) => a - b).forEach(idx => {
+    const c = COLLECTIBLES[idx];
+    if (!groups[c.tag]) groups[c.tag] = [];
+    groups[c.tag].push(c);
+  });
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      animation: "fadeIn 0.2s ease", padding: "20px",
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "#FAFAF8", borderRadius: "20px", padding: "28px 24px",
+        maxWidth: "380px", width: "100%", maxHeight: "80vh", overflowY: "auto",
+        boxShadow: "0 8px 40px rgba(0,0,0,0.12)", animation: "fadeUp 0.3s ease",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+          <div style={{ fontSize: "15px", fontWeight: 500, color: "#333" }}>
+            收集 {unlocked.length}/{total}
+          </div>
+          <button onClick={onClose} style={{
+            border: "none", background: "none", fontSize: "18px", color: "#999", cursor: "pointer", padding: "4px 8px",
+          }}>×</button>
+        </div>
+
+        {unlocked.length === 0 ? (
+          <div style={{ fontSize: "13px", color: "#bbb", textAlign: "center", padding: "40px 0" }}>
+            完成第一个番茄，解锁第一个碎片
+          </div>
+        ) : (
+          Object.entries(groups).map(([tag, items]) => (
+            <div key={tag} style={{ marginBottom: "20px" }}>
+              <div style={{
+                fontSize: "11px", color: "#aaa", letterSpacing: "1px", marginBottom: "10px",
+                textTransform: "uppercase",
+              }}>{tag}</div>
+              {items.map((item, i) => (
+                <div key={i} style={{
+                  fontSize: "13px", color: "#555", lineHeight: 1.8,
+                  marginBottom: "12px", paddingLeft: "12px",
+                  borderLeft: "2px solid #e0e0e0",
+                }}>
+                  {item.text}
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+
+        {unlocked.length > 0 && unlocked.length < total && (
+          <div style={{ fontSize: "12px", color: "#ccc", textAlign: "center", marginTop: "8px" }}>
+            还有{total - unlocked.length}个碎片等你解锁
+          </div>
+        )}
+        {unlocked.length >= total && (
+          <div style={{ fontSize: "12px", color: "#B8860B", textAlign: "center", marginTop: "8px" }}>
+            ✦ 全部收集完成 ✦
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// === Main App ===
+const MODES = { focus: { duration: 25 * 60 }, shortBreak: { duration: 5 * 60 }, longBreak: { duration: 15 * 60 } };
 
 function Pomodoro() {
   const [phase, setPhase] = useState("idle");
@@ -50,17 +189,14 @@ function Pomodoro() {
   const [idleLine, setIdleLine] = useState("");
   const [goal, setGoal] = useState("");
   const [showGoalInput, setShowGoalInput] = useState(false);
+  const [showCollection, setShowCollection] = useState(false);
+  const [newCollectible, setNewCollectible] = useState(null);
+  const [totalCount, setTotalCount] = useState(STORAGE.getTotal());
   const intervalRef = useRef(null);
   const idleIntervalRef = useRef(null);
 
-  const breakDuration = completed > 0 && completed % 4 === 0
-    ? MODES.longBreak.duration
-    : MODES.shortBreak.duration;
-
-  const totalDuration = phase === "focus" ? MODES.focus.duration
-    : phase === "break" ? breakDuration
-    : MODES.focus.duration;
-
+  const breakDuration = completed > 0 && completed % 4 === 0 ? MODES.longBreak.duration : MODES.shortBreak.duration;
+  const totalDuration = phase === "focus" ? MODES.focus.duration : phase === "break" ? breakDuration : MODES.focus.duration;
   const progress = phase !== "idle" ? 1 - timeLeft / totalDuration : 0;
   const circumference = 2 * Math.PI * 120;
   const strokeDashoffset = circumference * (1 - progress);
@@ -109,12 +245,17 @@ function Pomodoro() {
           if (phase === "focus") {
             setFinished(true);
             setCompleted(c => c + 1);
+            STORAGE.recordCompletion();
+            setTotalCount(STORAGE.getTotal());
+            const idx = STORAGE.unlockNext();
+            if (idx !== null && typeof COLLECTIBLES !== "undefined") {
+              setNewCollectible(COLLECTIBLES[idx]);
+            } else {
+              setNewCollectible(null);
+            }
           } else {
-            setPhase("idle");
-            setTask(null);
-            setCharacter(null);
-            setInterrupted(false);
-            setFinished(false);
+            setPhase("idle"); setTask(null); setCharacter(null);
+            setInterrupted(false); setFinished(false); setNewCollectible(null);
             return MODES.focus.duration;
           }
           return 0;
@@ -129,25 +270,22 @@ function Pomodoro() {
     const c = Math.random() > 0.5 ? "P" : "H";
     const pool = c === "H" ? H_TASKS : P_TASKS;
     const t = pool[Math.floor(Math.random() * pool.length)];
-    setCharacter(c);
-    setTask(t);
-    setPhase("focus");
-    setTimeLeft(MODES.focus.duration);
-    setRunning(true);
-    setInterrupted(false);
-    setFinished(false);
-    setShowGoalInput(false);
+    setCharacter(c); setTask(t); setPhase("focus"); setTimeLeft(MODES.focus.duration);
+    setRunning(true); setInterrupted(false); setFinished(false);
+    setShowGoalInput(false); setNewCollectible(null);
   };
 
   const handleInterrupt = () => { setRunning(false); setInterrupted(true); };
   const resumeFromInterrupt = () => { setRunning(true); setInterrupted(false); };
-  const startBreak = () => { setPhase("break"); setTimeLeft(breakDuration); setRunning(true); setFinished(false); setInterrupted(false); };
-  const giveUp = () => { setPhase("idle"); setRunning(false); setTask(null); setCharacter(null); setInterrupted(false); setFinished(false); setTimeLeft(MODES.focus.duration); };
+  const startBreak = () => { setPhase("break"); setTimeLeft(breakDuration); setRunning(true); setFinished(false); setInterrupted(false); setNewCollectible(null); };
+  const giveUp = () => { setPhase("idle"); setRunning(false); setTask(null); setCharacter(null); setInterrupted(false); setFinished(false); setTimeLeft(MODES.focus.duration); setNewCollectible(null); };
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
   const charName = task?.label || (character === "H" ? "Hesperon" : "Phorion");
   const charIcon = character === "H" ? "✧" : "♞";
+  const unlockedCount = STORAGE.getUnlocked().length;
+  const collectibleTotal = typeof COLLECTIBLES !== "undefined" ? COLLECTIBLES.length : 0;
 
   return (
     <div style={{
@@ -163,14 +301,17 @@ function Pomodoro() {
         transition: "background 0.6s", pointerEvents: "none",
       }} />
 
+      {/* ====== IDLE STATE ====== */}
       {phase === "idle" && !finished && (
         <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.5s ease" }}>
           <div style={{ fontSize: "13px", color: "#aaa", letterSpacing: "3px", marginBottom: "24px" }}>POMODORO</div>
+
           {completed > 0 && (
             <div style={{ display: "flex", gap: "6px", justifyContent: "center", marginBottom: "24px", flexWrap: "wrap" }}>
               {Array.from({ length: completed }).map((_, i) => (<span key={i} style={{ fontSize: "18px" }}>🍅</span>))}
             </div>
           )}
+
           {showGoalInput ? (
             <div style={{ marginBottom: "32px" }}>
               <input type="text" value={goal} onChange={e => setGoal(e.target.value)}
@@ -181,18 +322,44 @@ function Pomodoro() {
                   width: "280px", fontFamily: "inherit" }} />
             </div>
           ) : null}
+
           <button onClick={() => { if (!showGoalInput) { setShowGoalInput(true); return; } startSession(); }}
             style={{ padding: "16px 48px", borderRadius: "40px", border: "none", background: "#333",
               color: "white", fontSize: "15px", fontFamily: "inherit", cursor: "pointer",
               letterSpacing: "1px", transition: "transform 0.2s" }}>
             {showGoalInput ? "开始专注" : "准备好了"}
           </button>
+
           {!showGoalInput && (
             <div style={{ marginTop: "16px", fontSize: "13px", color: "#bbb" }}>你的OC会陪你一起工作25分钟</div>
           )}
+
+          {/* Stats section */}
+          <div style={{ marginTop: "48px", display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
+            {/* Heatmap */}
+            <div>
+              <Heatmap color="#888" />
+              <div style={{ fontSize: "11px", color: "#ccc", marginTop: "8px" }}>
+                累计 {totalCount} 个番茄
+              </div>
+            </div>
+
+            {/* Collection button */}
+            {collectibleTotal > 0 && (
+              <button onClick={() => setShowCollection(true)} style={{
+                border: "1px solid #e8e8e8", background: "white", borderRadius: "20px",
+                padding: "8px 20px", fontSize: "12px", color: "#999",
+                fontFamily: "inherit", cursor: "pointer", transition: "all 0.2s",
+              }}>
+                碎片 {unlockedCount}/{collectibleTotal}
+                {unlockedCount >= collectibleTotal ? " ✦" : ""}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
+      {/* ====== FOCUS STATE ====== */}
       {phase === "focus" && !finished && (
         <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.4s ease" }}>
           <div style={{ marginBottom: "8px", fontSize: "13px", color: colors.main, letterSpacing: "2px", fontWeight: 500, opacity: 0.7 }}>
@@ -255,6 +422,7 @@ function Pomodoro() {
         </div>
       )}
 
+      {/* ====== FINISHED STATE ====== */}
       {finished && (
         <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.4s ease" }}>
           <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: `${colors.main}12`,
@@ -263,6 +431,23 @@ function Pomodoro() {
           </div>
           <div style={{ fontSize: "15px", color: "#333", marginBottom: "8px", fontWeight: 500 }}>{charName}完成了。</div>
           <div style={{ fontSize: "14px", color: "#666", lineHeight: 1.7, maxWidth: "300px", marginBottom: "8px", fontStyle: "italic" }}>{task?.done}</div>
+
+          {/* New collectible */}
+          {newCollectible && (
+            <div style={{
+              background: "white", borderRadius: "14px", padding: "20px 22px", margin: "20px auto",
+              maxWidth: "320px", boxShadow: "0 2px 16px rgba(0,0,0,0.05)", animation: "fadeUp 0.5s ease",
+              borderLeft: `3px solid ${colors.main}40`,
+            }}>
+              <div style={{ fontSize: "10px", color: "#bbb", letterSpacing: "1.5px", marginBottom: "8px" }}>
+                ✦ NEW FRAGMENT · {newCollectible.tag}
+              </div>
+              <div style={{ fontSize: "13px", color: "#555", lineHeight: 1.8 }}>
+                {newCollectible.text}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: "6px", justifyContent: "center", marginBottom: "28px", marginTop: "16px" }}>
             {Array.from({ length: completed }).map((_, i) => (<span key={i} style={{ fontSize: "16px" }}>🍅</span>))}
           </div>
@@ -274,6 +459,7 @@ function Pomodoro() {
         </div>
       )}
 
+      {/* ====== BREAK STATE ====== */}
       {phase === "break" && (
         <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.4s ease" }}>
           <div style={{ fontSize: "13px", color: "#5BA87A", letterSpacing: "2px", marginBottom: "20px" }}>REST</div>
@@ -301,6 +487,9 @@ function Pomodoro() {
           </button>
         </div>
       )}
+
+      {/* Collection modal */}
+      {showCollection && <CollectionViewer onClose={() => setShowCollection(false)} />}
     </div>
   );
 }
