@@ -197,6 +197,9 @@ function Pomodoro() {
   const [totalCount, setTotalCount] = useState(STORAGE.getTotal());
   const intervalRef = useRef(null);
   const idleIntervalRef = useRef(null);
+  const endTimeRef = useRef(null);
+  const runningRef = useRef(false);
+  const phaseRef = useRef("idle");
 
   const breakDuration = completed > 0 && completed % 4 === 0 ? MODES.longBreak.duration : MODES.shortBreak.duration;
   const totalDuration = phase === "focus" ? MODES.focus.duration : phase === "break" ? breakDuration : MODES.focus.duration;
@@ -219,6 +222,9 @@ function Pomodoro() {
     } catch (e) {}
   }, []);
 
+  useEffect(() => { runningRef.current = running; }, [running]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+
   useEffect(() => {
     if (phase === "focus" && running && character) {
       const lines = character === "H" ? H_IDLE_LINES : P_IDLE_LINES;
@@ -228,39 +234,58 @@ function Pomodoro() {
     }
   }, [phase, running, character]);
 
+  const triggerComplete = useCallback((currentPhase) => {
+    clearInterval(intervalRef.current); setRunning(false); playSound();
+    if (currentPhase === "focus") {
+      setFinished(true); setCompleted(c => c + 1);
+      STORAGE.recordCompletion(); setTotalCount(STORAGE.getTotal());
+      const idx = STORAGE.unlockNext();
+      setNewCollectible(idx !== null && typeof COLLECTIBLES !== "undefined" ? COLLECTIBLES[idx] : null);
+    } else {
+      setPhase("idle"); setTask(null); setCharacter(null); setInterrupted(false); setFinished(false); setNewCollectible(null);
+      setTimeLeft(MODES.focus.duration);
+    }
+  }, [playSound]);
+
   useEffect(() => {
     if (!running) { if (intervalRef.current) clearInterval(intervalRef.current); return; }
     intervalRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(intervalRef.current); setRunning(false); playSound();
-          if (phase === "focus") {
-            setFinished(true); setCompleted(c => c + 1);
-            STORAGE.recordCompletion(); setTotalCount(STORAGE.getTotal());
-            const idx = STORAGE.unlockNext();
-            setNewCollectible(idx !== null && typeof COLLECTIBLES !== "undefined" ? COLLECTIBLES[idx] : null);
-          } else {
-            setPhase("idle"); setTask(null); setCharacter(null); setInterrupted(false); setFinished(false); setNewCollectible(null);
-            return MODES.focus.duration;
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
+      const newTime = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+      setTimeLeft(newTime);
+      if (newTime <= 0) triggerComplete(phase);
     }, 1000);
     return () => clearInterval(intervalRef.current);
-  }, [running, phase, playSound]);
+  }, [running, phase, triggerComplete]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!runningRef.current || !endTimeRef.current) return;
+      const newTime = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+      setTimeLeft(newTime);
+      if (newTime <= 0) triggerComplete(phaseRef.current);
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [triggerComplete]);
 
   const startSession = () => {
     const c = Math.random() > 0.5 ? "P" : "H";
     const pool = c === "H" ? H_TASKS : P_TASKS;
     const t = pool[Math.floor(Math.random() * pool.length)];
     setCharacter(c); setTask(t); setPhase("focus"); setTimeLeft(MODES.focus.duration);
+    endTimeRef.current = Date.now() + MODES.focus.duration * 1000;
     setRunning(true); setInterrupted(false); setFinished(false); setShowGoalInput(false); setNewCollectible(null);
   };
   const handleInterrupt = () => { setRunning(false); setInterrupted(true); };
-  const resumeFromInterrupt = () => { setRunning(true); setInterrupted(false); };
-  const startBreak = () => { setPhase("break"); setTimeLeft(breakDuration); setRunning(true); setFinished(false); setInterrupted(false); setNewCollectible(null); };
+  const resumeFromInterrupt = () => {
+    endTimeRef.current = Date.now() + timeLeft * 1000;
+    setRunning(true); setInterrupted(false);
+  };
+  const startBreak = () => {
+    endTimeRef.current = Date.now() + breakDuration * 1000;
+    setPhase("break"); setTimeLeft(breakDuration); setRunning(true); setFinished(false); setInterrupted(false); setNewCollectible(null);
+  };
   const giveUp = () => { setPhase("idle"); setRunning(false); setTask(null); setCharacter(null); setInterrupted(false); setFinished(false); setTimeLeft(MODES.focus.duration); setNewCollectible(null); };
 
   const minutes = Math.floor(timeLeft / 60);
