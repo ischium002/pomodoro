@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Pomodoro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; width: 100%; }
+  body { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  button:active { transform: scale(0.96) !important; }
+  input:focus { outline: none; }
+</style>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
+
+const H_TASKS = [
+  { doing: "正在审阅学生的实验报告", detail: "红笔搁在手边，视线沿着数据列缓缓下移", interrupted: "笔尖停在某个数字上方。他把报告翻回上一页，标记的位置要重新确认。", done: "合上报告，在封面写了一行批注。字很小，但每个笔画都清楚。" },
+  { doing: "正在听一张很久没听的唱片", detail: "闭着眼，呼吸很浅，手指搭在桌沿，没有跟节拍", interrupted: "他摘下耳机的动作很轻。曲子停在中间，不会再从头听了。", done: "最后一轨结束。他安静了几秒，把唱片放回最容易拿到的位置。" },
+  { doing: "正在推导一组断裂扩展参数", detail: "笔记本摊开，手写的公式排列得极其工整", interrupted: "笔停了。他看了一眼写到一半的等式，没有合上本子。", done: "最后一个参数落笔。他翻到前面某页对照了一遍，很轻地点了下头。" },
+  { label: "Wizard H", doing: "正在修整一只陶杯的杯口", detail: "指腹沿着边缘慢慢转，找那个差零点几毫米的不均匀", interrupted: "手从泥胚上移开了。杯口还没修好的那段弧度留在那里。", done: "杯口终于圆了。不算完美，但他看了两秒，决定留着这个弧度。" },
+  { doing: "正在读一本系统神学的旧版本", detail: "指尖压着书脊，偶尔翻回前面某页对照", interrupted: "视线从书页上移开。他在那一段折了个角，但读到哪里的语境会冷掉。", done: "合上书。「……从系统设计的角度说，确实很了不起。」" },
+  { label: "Wizard H", doing: "正在校准法师塔的空间压缩参数", detail: "指尖悬在符文阵上方两厘米，魔力维持在刚好能感知的阈值", interrupted: "魔力收回来了。符文阵上的微调痕迹慢慢淡去。", done: "最后一组参数锁定。塔里的光微微波动了一下，然后稳住了。" },
+  { doing: "正在整理图书馆特殊文献的目录", detail: "旧卡片一张张过手，偶尔停下来在某张背面添一行注释", interrupted: "手里的卡片放回原位。排序到一半的目录比开始之前更乱了。", done: "最后一张卡片归位。他站起来退后一步看了看整面分类墙，点了一下头。" },
+  { label: "Angel H", doing: "正在核查一份秩序修复报告", detail: "手指沿着案卷页边缓缓滑动，偶尔在某行停住", interrupted: "案卷合上了。他的指尖还停在方才那一行的位置上。", done: "案卷存档。他把桌面上的文件推齐，动作精确得像在摆放仪器。" },
+  { doing: "正在校准一组材料测试参数", detail: "屏幕上的曲线在微调中一点点逼近理论值", interrupted: "光标停住了。偏差修正到一半，后续步骤要从断点重新算。", done: "曲线终于和理论模型重合了。偏差不超过3%。他在笔记本边缘记了一行很轻的字。" },
+  { label: "Wizard H", doing: "正在撰写一份断裂力学手稿的某个章节", detail: "纸页上的字迹工整得像印刷体，公式编号对齐到同一列", interrupted: "笔搁下了。逻辑链断在接续部最难的转折处。", done: "章节末尾的句号落下。他把手稿叠齐，放在桌角固定的位置。" },
+  { doing: "正在读一本跟专业完全无关的书", detail: "床头灯底下，手指按着书页翻得很慢，偶尔停下来看同一段", interrupted: "他把书扣在膝盖上。没有折角，但读到的位置可能会忘。", done: "看完了最后一页。他把书合上放到一边，安静了一会儿。" },
+];
+
+const P_TASKS = [
+  { doing: "正在打一通需要耐心的电话", detail: "声音不紧不慢，笑意恰到好处，手指无意识地转着笔", interrupted: "他按了静音。电话那头还在说，这边的节奏断了。", done: "挂掉电话，靠回椅背。嘴角还挂着刚才那个笑，但眼神已经在想下一步了。" },
+  { doing: "正在拉片，反复看同一段镜头", detail: "进度条来回拖了四遍，每次停的位置都不一样", interrupted: "画面暂停在一个不上不下的帧。他退出全屏，刚要成形的观察散了。", done: "他想通了那个镜头在做什么。靠回去，手指敲了两下桌面。满意。" },
+  { label: "Merchant P", doing: "正在清点货物并标注价格", detail: "一手翻货单一手摸商品，报价在嘴里过了一遍就定了", interrupted: "货单翻回上一页。他刚才标到哪个了。", done: "最后一项标完。他把货单卷起来塞进口袋，心里已经在排今天的路线了。" },
+  { doing: "正在往本子上记些什么", detail: "不是记信息本身，是在画信息之间的关系。字很小，只有自己能看懂", interrupted: "笔停了。他把本子合上搁在手边，脸上什么都看不出来。", done: "写完了。他把本子放进左内袋，手指隔着衣服确认了一下位置。" },
+  { doing: "正在为某个人准备一件东西", detail: "表情比平时认真，反复确认了同一个细节三次", interrupted: "他很快把东西收起来了。本来就不是给你看的。", done: "一切就绪。他深吸了一口气，把东西放进包里的时候手指比平时轻。" },
+  { label: "Merchant P", doing: "正在缝一件磨损的皮具", detail: "针线穿得很稳，走线比看上去的整齐", interrupted: "针停在皮面上。他把线暂时绕在指尖，等着。", done: "最后一针收线。他翻过来看了看，笑了。缝得其实没那么好，但能用。" },
+  { label: "Devil P", doing: "正在评估一份需要处理的状况", detail: "翻着材料，表情比平时淡，眼神比平时锐利一点", interrupted: "材料放下了。他捏了捏眉心。快要成型的方案散了一半。", done: "所有线索串成一条线。他往后一靠，笑了。不是对你笑的。" },
+  { doing: "正在凭手感调一道菜的味道", detail: "尝了一口，偏头想了两秒，又加了一点什么", interrupted: "灶上还开着火。他先去关火，再转过来。", done: "最后尝了一口。表情没什么变化，但他多盛了一份放在旁边。那份不是给自己的。" },
+  { doing: "正在看一份人事调动相关的材料", detail: "翻页的速度不快不慢，每一页停留的时间恰好够把关键信息吃进去", interrupted: "材料合上了。他的表情从刚才无法辨读的沉稳切换回日常的松弛，快得像翻开关。", done: "材料放到处理完毕那一摞。他端起茶喝了一口，茶已经凉了，但没皱眉。" },
+  { label: "Merchant P", doing: "正在规划接下来一周的路线", detail: "地图摊在桌上，手指沿着某条路划了两遍，嘴里在算时间", interrupted: "手指停在地图上某个路口。他抬头看了你一眼，没说什么。", done: "路线定了。他把地图折好，塞进副驾门板里。" },
+  { doing: "正在给一封不太好写的信措辞", detail: "写了几个字又划掉，比平时多花了三倍时间在一个开头上", interrupted: "他把纸翻过去扣在桌上。有些话，断了就接不上了。", done: "签上名字。叠好，放进信封。用指腹压平封口的时候动作很慢。" },
+];
+
+const H_IDLE_LINES = [
+  "（呼吸很浅，完全沉进去了）",
+  "（翻了一页，没有任何声音）",
+  "（手搁在纸上没有动，在想什么）",
+  "（安静到你差点忘记他在）",
+  "（桌上的茶不知道什么时候自己热了一下）",
+  "（偶尔把笔尖抵在下唇，不自觉的习惯）",
+  "（袖口卷到小臂中段，一直没放下来）",
+];
+
+const P_IDLE_LINES = [
+  "（食指和中指交替轻敲桌面，频率很稳）",
+  "（偶尔抬头看你一眼，什么都没说，又低下去了）",
+  "（表情比平时认真，嘴角那点弧度收起来了）",
+  "（翻了一页，顿了一下，在某行多看了两秒）",
+  "（安静的样子跟平时不太一样）",
+  "（手指从纸面上移开，又放回去，改了一个字）",
+  "（靠在椅背上，视线落在远处某个点上，过了几秒回来继续）",
+];
+
+const MODES = {
+  focus: { duration: 25 * 60 },
+  shortBreak: { duration: 5 * 60 },
+  longBreak: { duration: 15 * 60 },
+};
+
+function Pomodoro() {
+  const [phase, setPhase] = useState("idle");
+  const [timeLeft, setTimeLeft] = useState(MODES.focus.duration);
+  const [running, setRunning] = useState(false);
+  const [completed, setCompleted] = useState(0);
+  const [character, setCharacter] = useState(null);
+  const [task, setTask] = useState(null);
+  const [interrupted, setInterrupted] = useState(false);
+  const [finished, setFinished] = useState(false);
+  const [idleLine, setIdleLine] = useState("");
+  const [goal, setGoal] = useState("");
+  const [showGoalInput, setShowGoalInput] = useState(false);
+  const intervalRef = useRef(null);
+  const idleIntervalRef = useRef(null);
+
+  const breakDuration = completed > 0 && completed % 4 === 0
+    ? MODES.longBreak.duration
+    : MODES.shortBreak.duration;
+
+  const totalDuration = phase === "focus" ? MODES.focus.duration
+    : phase === "break" ? breakDuration
+    : MODES.focus.duration;
+
+  const progress = phase !== "idle" ? 1 - timeLeft / totalDuration : 0;
+  const circumference = 2 * Math.PI * 120;
+  const strokeDashoffset = circumference * (1 - progress);
+
+  const colors = useMemo(() => {
+    if (phase === "break") return { main: "#5BA87A", bg: "#F0FAF3", glow: "#5BA87A25" };
+    if (character === "H") return { main: "#4A6FA5", bg: "#F4F7FB", glow: "#4A6FA520" };
+    if (character === "P") return { main: "#8B6914", bg: "#FBF8F2", glow: "#8B691420" };
+    return { main: "#888", bg: "#F8F8F8", glow: "#88888815" };
+  }, [phase, character]);
+
+  const playSound = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const n = (f, s, d) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.frequency.value = f; o.type = "sine";
+        g.gain.setValueAtTime(0.25, ctx.currentTime + s);
+        g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + s + d);
+        o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d);
+      };
+      n(440, 0, 0.12); n(554, 0.12, 0.12); n(659, 0.24, 0.25);
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    if (phase === "focus" && running && character) {
+      const lines = character === "H" ? H_IDLE_LINES : P_IDLE_LINES;
+      setIdleLine(lines[Math.floor(Math.random() * lines.length)]);
+      idleIntervalRef.current = setInterval(() => {
+        setIdleLine(lines[Math.floor(Math.random() * lines.length)]);
+      }, 45000);
+      return () => clearInterval(idleIntervalRef.current);
+    }
+  }, [phase, running, character]);
+
+  useEffect(() => {
+    if (!running) { if (intervalRef.current) clearInterval(intervalRef.current); return; }
+    intervalRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(intervalRef.current);
+          setRunning(false);
+          playSound();
+          if (phase === "focus") {
+            setFinished(true);
+            setCompleted(c => c + 1);
+          } else {
+            setPhase("idle");
+            setTask(null);
+            setCharacter(null);
+            setInterrupted(false);
+            setFinished(false);
+            return MODES.focus.duration;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(intervalRef.current);
+  }, [running, phase, playSound]);
+
+  const startSession = () => {
+    const c = Math.random() > 0.5 ? "P" : "H";
+    const pool = c === "H" ? H_TASKS : P_TASKS;
+    const t = pool[Math.floor(Math.random() * pool.length)];
+    setCharacter(c);
+    setTask(t);
+    setPhase("focus");
+    setTimeLeft(MODES.focus.duration);
+    setRunning(true);
+    setInterrupted(false);
+    setFinished(false);
+    setShowGoalInput(false);
+  };
+
+  const handleInterrupt = () => { setRunning(false); setInterrupted(true); };
+  const resumeFromInterrupt = () => { setRunning(true); setInterrupted(false); };
+  const startBreak = () => { setPhase("break"); setTimeLeft(breakDuration); setRunning(true); setFinished(false); setInterrupted(false); };
+  const giveUp = () => { setPhase("idle"); setRunning(false); setTask(null); setCharacter(null); setInterrupted(false); setFinished(false); setTimeLeft(MODES.focus.duration); };
+
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = timeLeft % 60;
+  const charName = task?.label || (character === "H" ? "Hesperon" : "Phorion");
+  const charIcon = character === "H" ? "✧" : "♞";
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: colors.bg, transition: "background 0.6s ease",
+      fontFamily: "'Noto Serif SC', 'Georgia', serif",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "24px", position: "relative",
+    }}>
+      <div style={{
+        position: "absolute", width: "500px", height: "500px", borderRadius: "50%",
+        background: `radial-gradient(circle, ${colors.glow} 0%, transparent 70%)`,
+        top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        transition: "background 0.6s", pointerEvents: "none",
+      }} />
+
+      {phase === "idle" && !finished && (
+        <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.5s ease" }}>
+          <div style={{ fontSize: "13px", color: "#aaa", letterSpacing: "3px", marginBottom: "24px" }}>POMODORO</div>
+          {completed > 0 && (
+            <div style={{ display: "flex", gap: "6px", justifyContent: "center", marginBottom: "24px", flexWrap: "wrap" }}>
+              {Array.from({ length: completed }).map((_, i) => (<span key={i} style={{ fontSize: "18px" }}>🍅</span>))}
+            </div>
+          )}
+          {showGoalInput ? (
+            <div style={{ marginBottom: "32px" }}>
+              <input type="text" value={goal} onChange={e => setGoal(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && startSession()}
+                placeholder="这25分钟我要…" autoFocus
+                style={{ border: "none", borderBottom: "1.5px solid #ccc", background: "transparent",
+                  fontSize: "16px", color: "#333", textAlign: "center", padding: "8px 16px",
+                  width: "280px", fontFamily: "inherit" }} />
+            </div>
+          ) : null}
+          <button onClick={() => { if (!showGoalInput) { setShowGoalInput(true); return; } startSession(); }}
+            style={{ padding: "16px 48px", borderRadius: "40px", border: "none", background: "#333",
+              color: "white", fontSize: "15px", fontFamily: "inherit", cursor: "pointer",
+              letterSpacing: "1px", transition: "transform 0.2s" }}>
+            {showGoalInput ? "开始专注" : "准备好了"}
+          </button>
+          {!showGoalInput && (
+            <div style={{ marginTop: "16px", fontSize: "13px", color: "#bbb" }}>你的OC会陪你一起工作25分钟</div>
+          )}
+        </div>
+      )}
+
+      {phase === "focus" && !finished && (
+        <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.4s ease" }}>
+          <div style={{ marginBottom: "8px", fontSize: "13px", color: colors.main, letterSpacing: "2px", fontWeight: 500, opacity: 0.7 }}>
+            {charName.toUpperCase()}
+          </div>
+          <div style={{ fontSize: "18px", color: "#2a2a2a", marginBottom: "6px", fontWeight: 500 }}>{task?.doing}</div>
+          <div style={{ fontSize: "13px", color: "#999", marginBottom: "32px", fontStyle: "italic", maxWidth: "320px", lineHeight: 1.6 }}>{task?.detail}</div>
+
+          <div style={{ position: "relative", width: "270px", height: "270px", margin: "0 auto 20px" }}>
+            <svg width="270" height="270" style={{ transform: "rotate(-90deg)" }}>
+              <circle cx="135" cy="135" r="120" fill="none" stroke={`${colors.main}10`} strokeWidth="5" />
+              <circle cx="135" cy="135" r="120" fill="none" stroke={colors.main} strokeWidth="5"
+                strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
+                style={{ transition: "stroke-dashoffset 0.5s ease" }} />
+            </svg>
+            <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center" }}>
+              <div style={{ fontSize: "56px", fontWeight: 300, color: "#1a1a1a", fontVariantNumeric: "tabular-nums",
+                fontFamily: "'SF Mono', 'Menlo', monospace", lineHeight: 1 }}>
+                {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+              </div>
+            </div>
+          </div>
+
+          {running && !interrupted && (
+            <div style={{ fontSize: "13px", color: "#aaa", marginBottom: "28px", fontStyle: "italic", minHeight: "20px", transition: "opacity 0.5s" }}>
+              {idleLine}
+            </div>
+          )}
+
+          {interrupted && (
+            <div style={{ background: "white", borderRadius: "16px", padding: "24px 28px", marginBottom: "24px",
+              maxWidth: "320px", boxShadow: "0 2px 20px rgba(0,0,0,0.06)", animation: "fadeUp 0.3s ease" }}>
+              <div style={{ fontSize: "15px", color: "#c44", marginBottom: "12px", fontWeight: 500 }}>
+                你打断了{charName}。
+              </div>
+              <div style={{ fontSize: "14px", color: "#666", lineHeight: 1.7, marginBottom: "20px" }}>{task?.interrupted}</div>
+              <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                <button onClick={resumeFromInterrupt} style={{ padding: "10px 24px", borderRadius: "20px", border: "none",
+                  background: colors.main, color: "white", fontSize: "13px", fontFamily: "inherit", cursor: "pointer" }}>
+                  让他继续
+                </button>
+                <button onClick={giveUp} style={{ padding: "10px 24px", borderRadius: "20px", border: "1px solid #ddd",
+                  background: "white", color: "#999", fontSize: "13px", fontFamily: "inherit", cursor: "pointer" }}>
+                  算了
+                </button>
+              </div>
+            </div>
+          )}
+
+          {running && !interrupted && (
+            <button onClick={handleInterrupt} style={{ width: "56px", height: "56px", borderRadius: "50%",
+              border: `1.5px solid ${colors.main}30`, background: "white", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "18px", color: colors.main, margin: "0 auto", transition: "all 0.2s" }}>
+              ⏸
+            </button>
+          )}
+
+          {goal && (<div style={{ marginTop: "20px", fontSize: "12px", color: "#bbb" }}>🎯 {goal}</div>)}
+        </div>
+      )}
+
+      {finished && (
+        <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.4s ease" }}>
+          <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: `${colors.main}12`,
+            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: "28px" }}>
+            {charIcon}
+          </div>
+          <div style={{ fontSize: "15px", color: "#333", marginBottom: "8px", fontWeight: 500 }}>{charName}完成了。</div>
+          <div style={{ fontSize: "14px", color: "#666", lineHeight: 1.7, maxWidth: "300px", marginBottom: "8px", fontStyle: "italic" }}>{task?.done}</div>
+          <div style={{ display: "flex", gap: "6px", justifyContent: "center", marginBottom: "28px", marginTop: "16px" }}>
+            {Array.from({ length: completed }).map((_, i) => (<span key={i} style={{ fontSize: "16px" }}>🍅</span>))}
+          </div>
+          <button onClick={startBreak} style={{ padding: "14px 40px", borderRadius: "30px", border: "none",
+            background: "#5BA87A", color: "white", fontSize: "14px", fontFamily: "inherit", cursor: "pointer", letterSpacing: "0.5px" }}>
+            休息{breakDuration / 60}分钟
+          </button>
+          <div style={{ marginTop: "12px", fontSize: "12px", color: "#bbb" }}>你也完成了。去玩一会儿吧。</div>
+        </div>
+      )}
+
+      {phase === "break" && (
+        <div style={{ textAlign: "center", position: "relative", zIndex: 1, animation: "fadeUp 0.4s ease" }}>
+          <div style={{ fontSize: "13px", color: "#5BA87A", letterSpacing: "2px", marginBottom: "20px" }}>REST</div>
+          <div style={{ position: "relative", width: "270px", height: "270px", margin: "0 auto 24px" }}>
+            <svg width="270" height="270" style={{ transform: "rotate(-90deg)" }}>
+              <circle cx="135" cy="135" r="120" fill="none" stroke="#5BA87A10" strokeWidth="5" />
+              <circle cx="135" cy="135" r="120" fill="none" stroke="#5BA87A" strokeWidth="5"
+                strokeLinecap="round" strokeDasharray={circumference}
+                strokeDashoffset={circumference * (1 - (1 - timeLeft / breakDuration))}
+                style={{ transition: "stroke-dashoffset 0.5s ease" }} />
+            </svg>
+            <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}>
+              <div style={{ fontSize: "56px", fontWeight: 300, color: "#1a1a1a", fontVariantNumeric: "tabular-nums",
+                fontFamily: "'SF Mono', 'Menlo', monospace" }}>
+                {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+              </div>
+            </div>
+          </div>
+          <div style={{ fontSize: "14px", color: "#999", lineHeight: 1.6 }}>
+            想想接下来的情节也好<br/>刷手机也好<br/>这几分钟是你的
+          </div>
+          <button onClick={() => { giveUp(); }} style={{ marginTop: "24px", padding: "10px 28px", borderRadius: "20px",
+            border: "1px solid #ddd", background: "white", color: "#999", fontSize: "13px", fontFamily: "inherit", cursor: "pointer" }}>
+            跳过，继续学
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Pomodoro />);
+</script>
+</body>
+</html>
